@@ -47,13 +47,17 @@ class Process():
 class Memory():
 	def __init__(self, algorithm):
 		self.cells = ['#' if x < OS_SIZE else '.' for x in range(MEM_SIZE)]
+		self.procs = []
 		self.algorithm = algorithm
+		self.lastBlock = 0
 
+	# Display memory to spec
 	def pprint(self, time):
 		print('Memory at time %d:' % time)
 		for i in range(0, MEM_SIZE, OS_SIZE):
 			print(''.join(self.cells[i:i+OS_SIZE]))
 
+	# Load one of the processes existing at t=0
 	def loadInit(self, proc):
 		count = 0
 		counting = False
@@ -68,13 +72,134 @@ class Memory():
 
 			self.cells[location] = proc.name
 
+		self.lastBlock = start + proc.size - 1
+		self.procs.append(proc)
+
 		return True
 
+	# Load a process based on the current algorithm
 	def loadProc(self, proc):
-		pass
+		# List of available spaces
+		spaces = []
+		inFree = False
+		startIndex = 0
+		freeCount = 0
 
+		# Gather a list of all available spaces (start loc and size)
+		for x in range(OS_SIZE, MEM_SIZE):
+			if self.cells[x] == '.' and not inFree:
+				inFree = True
+				startIndex = x
+				freeCount = 0
+			if self.cells[x] == '.' and inFree:
+				freeCount += 1
+			if self.cells[x] != '.' and inFree:
+				spaces.append((startIndex, freeCount))
+				inFree = False
+
+		if inFree:
+			spaces.append((startIndex, freeCount))
+
+		# Defrag if we can't find a single available space
+		if len(spaces) == 0:
+			return False
+
+		chosenSpace = None
+
+		# Find the first space that the process will fit
+		if self.algorithm == 'first':
+			for space in spaces:
+				if space[1] >= proc.size:
+					chosenSpace = space
+					break
+
+		# Find the smallest space that the process will fit
+		elif self.algorithm == 'best':
+			for space in spaces:
+				if chosenSpace is not None:
+					if space[1] >= proc.size and space[1] < chosenSpace[1]:
+						chosenSpace = space
+				else:
+					if space[1] >= proc.size:
+						chosenSpace = space
+
+		# Find the next space that the process will fit
+		elif self.algorithm == 'next':
+			print('spaces: %s' % str(spaces))
+
+			# First search spaces with a start location above the last block
+			for space in spaces:
+				print('lastblock: %d' % self.lastBlock)
+				if space[0] in range(self.lastBlock, 1600) and space[1] >= proc.size:
+					chosenSpace = space
+					break
+
+			# If we still haven't found a suitable location, check from the beginning
+			if chosenSpace is None:
+				for space in spaces:
+					if space[0] in range(OS_SIZE, self.lastBlock) and space[1] >= proc.size:
+						chosenSpace = space
+						break
+
+			print('chosenspace: %s' % str(chosenSpace))
+
+		# Find the worst (largest) space that the process will fit
+		elif self.algorithm == 'worst':
+			for space in spaces:
+				if chosenSpace is not None:
+					if space[1] >= proc.size and space[1] > chosenSpace[1]:
+						chosenSpace = space
+				else:
+					if space[1] >= proc.size:
+						chosenSpace = space
+
+		# Defrag if we can't find any possible space
+		if chosenSpace is None:
+			return False
+
+		# Replace memory in the chosen range
+		for x in range(chosenSpace[0], chosenSpace[0] + proc.size):
+			self.cells[x] = proc.name
+
+		# Save the last block for next fit algorithm
+		self.lastBlock = chosenSpace[0] + chosenSpace[1]
+
+		# Return true on successful process load
+		self.procs.append(proc)
+		return True
+
+	# Remove a process from memory
 	def unloadProc(self, proc):
-		self.cells.replace(proc.name, '.')
+		self.cells = [x if x != proc.name else '.' for x in self.cells]
+		self.procs.remove(proc)
+
+	# Simulate a defrag by cleaning out the memory entirely and placing
+	# each process back into memory sequentially
+	def defrag(self, proc, simTime):
+		# Print init message
+		print('Performing defragmentation...')
+
+		# Reset memory
+		self.cells = ['#' if x < OS_SIZE else '.' for x in range(MEM_SIZE)]
+
+		# Tracker var
+		curCell = OS_SIZE
+
+		# Loop through all processes and place them in memory sequentially
+		for proc in self.procs:
+			for x in range(curCell, curCell + proc.size):
+				self.cells[x] = proc.name
+				curCell = x
+
+		# Print completion message
+		print('Defragmentation completed.')
+		print('Relocated %d processes to create a free memory block of %d units (%.2f%% of total memory).'
+			 % (len(self.procs), self.cells.count('.'), self.cells.count('.') / MEM_SIZE * 100))
+		print()
+		self.pprint(simTime)
+
+		# Attempt to load the process again
+		return self.loadProc(proc)
 
 
 # Manages simulation time and all (inactive and active) processes
@@ -139,7 +264,7 @@ class ProcessManager():
 
 				# Check for processes leaving memory
 				for proc in self.procs[:]:
-					if proc.ending(simTime):
+					if proc.ending(self.simTime):
 						# Remove the ending process from memory
 						self.memory.unloadProc(proc)
 						change = True
@@ -150,7 +275,7 @@ class ProcessManager():
 
 				# Check for processes entering memory
 				for proc in self.procs:
-					if proc.starting():
+					if proc.starting(self.simTime):
 						change = True
 
 						# Attempt to load the process into memory
@@ -158,7 +283,7 @@ class ProcessManager():
 							change = False	# The defrag process will print memory upon completion
 
 							# If we couldn't load the process, try to defrag
-							if not self.memory.defrag(proc):
+							if not self.memory.defrag(proc, self.simTime):
 								# If a defrag didn't make enough space, end with an error
 								print('ERROR: OUT-OF-MEMORY, ending simulation')
 								return
@@ -166,6 +291,10 @@ class ProcessManager():
 				# If the memory state has changed, print it
 				if change:
 					self.memory.pprint(self.simTime)
+
+				# If we're out of processes, return
+				if len(self.procs) == 0:
+					return
 
 		# Otherwise, increment as far as requested
 		else:
@@ -175,7 +304,7 @@ class ProcessManager():
 
 				# Check for processes leaving memory
 				for proc in self.procs[:]:
-					if proc.ending(simTime):
+					if proc.ending(self.simTime):
 						# Remove the ending process from memory
 						self.memory.unloadProc(proc)
 
@@ -185,11 +314,11 @@ class ProcessManager():
 
 				# Check for processes entering memory
 				for proc in self.procs:
-					if proc.starting():
+					if proc.starting(self.simTime):
 						# Attempt to load the process into memory
 						if not self.memory.loadProc(proc):
 							# If we couldn't load the process, try to defrag
-							if not self.memory.defrag(proc):
+							if not self.memory.defrag(proc, self.simTime):
 								# If a defrag didn't make enough space, end with an error
 								print('ERROR: OUT-OF-MEMORY, ending simulation')
 								return
@@ -208,7 +337,10 @@ if __name__ == '__main__':
 		sys.exit()
 
 	# Check for quiet flag
-	if sys.argv[1] == '-q':
+	if sys.argv[1] == '-q' and len(sys.argv) != 4:
+		print('USAGE: %s [-q] <input-file> { noncontig | first | best | next | worst }' % sys.argv[0])
+		sys.exit()
+	elif sys.argv[1] == '-q':
 		quiet = True
 		inFile = sys.argv[2]
 		algorithm = sys.argv[3]
@@ -238,17 +370,19 @@ if __name__ == '__main__':
 	# Run simulation
 	if quiet:
 		procManager.runSim(-1)
+		print('Goodbye!')
+		sys.exit()
 	else:
 		response = 1
 
 		while True:
-			response = input('Enter t to continue simulation (0 will exit): ')
+			response = int(input('Enter t to continue simulation (0 will exit): '))
 
 			if response == 0:
 				print('Goodbye!')
 				sys.exit()
 
-			procManager.runSim(int(response))
+			procManager.runSim(response)
 
 
 
