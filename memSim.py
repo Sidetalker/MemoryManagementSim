@@ -399,7 +399,12 @@ if __name__ == '__main__':
 		response = 1
 
 		while True:
-			response = int(input('Enter t to continue simulation (0 will exit): '))
+			response = input('Enter t to continue simulation (0 will exit): ')
+
+			if not response.isdigit():
+				continue
+
+			response = int(response)
 
 			if response == 0:
 				print('Goodbye!')
