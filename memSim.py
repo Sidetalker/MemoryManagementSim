@@ -56,6 +56,7 @@ class Memory():
 		print('Memory at time %d:' % time)
 		for i in range(0, MEM_SIZE, OS_SIZE):
 			print(''.join(self.cells[i:i+OS_SIZE]))
+		print()
 
 	# Load one of the processes existing at t=0
 	def loadInit(self, proc):
@@ -153,6 +154,23 @@ class Memory():
 					if space[1] >= proc.size:
 						chosenSpace = space
 
+		# Non contiguous memory specified
+		elif self.algorithm == 'noncontig':
+			# If the process is larger than the available memory - we have failed
+			if proc.size > self.cells.count('.'):
+				return False
+
+			# Otherwise, loop on through the memory allocating space for the new process
+			totalSize = proc.size
+
+			for x in range(OS_SIZE, MEM_SIZE):
+				if totalSize == 0:
+					break
+				else:
+					if self.cells[x] == '.':
+						self.cells[x] = proc.name
+						totalSize -= 1
+
 		# Defrag if we can't find any possible space
 		if chosenSpace is None:
 			return False
@@ -176,6 +194,10 @@ class Memory():
 	# Simulate a defrag by cleaning out the memory entirely and placing
 	# each process back into memory sequentially
 	def defrag(self, proc, simTime):
+		# If this is noncontigous memory, fail the defrag right away
+		if self.algorithm == 'noncontig':
+			return False
+
 		# Print init message
 		print('Performing defragmentation...')
 
@@ -365,7 +387,8 @@ if __name__ == '__main__':
 
 	# Load memory
 	if not procManager.loadMem():
-		print('ERROR: Could not fit all initial processes in available memory')
+		print('ERROR: OUT-OF-MEMORY, ending simulation')
+		sys.exit()
 
 	# Run simulation
 	if quiet:
